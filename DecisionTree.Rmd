@@ -1,0 +1,107 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+---
+title: "ModelBalancedData"
+author: "Lin Chen"
+date: "7/30/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=16, fig.height=12) 
+```
+
+Open the CSV data and change (gender, hypertension, heart_disease, ever_married, work_type,
+Residence_type, stroke) as factor
+```{r}
+Stroke = read.csv("/Users/chenlin/Desktop/UT/Summer/Predictive\ Models/Predictive-Model-R/cleanedData.csv")
+Stroke$gender <- as.factor(Stroke$gender)
+#Stroke$hypertension <- as.factor(Stroke$hypertension)
+#Stroke$heart_disease <- as.factor(Stroke$heart_disease)
+Stroke$ever_married <- as.factor(Stroke$ever_married)
+#Stroke$work_type <- as.factor(Stroke$work_type)
+Stroke$Residence_type <- as.factor(Stroke$Residence_type)
+Stroke$smoking_status <- as.factor(Stroke$smoking_status)
+Stroke$stroke <- as.factor(Stroke$stroke)
+
+Stroke = Stroke[,-c(1, 8)]
+attach(Stroke)
+```
+
+```{r}
+train_stroke_full <- Stroke[Stroke$stroke==1,]
+set.seed(123)
+order1 <- sample(nrow(train_stroke_full), 500)
+train_stroke <- train_stroke_full[order1, ]
+test_stroke <- train_stroke_full[-order1, ]
+train_nonstroke_full <- Stroke[Stroke$stroke==0, ]
+order2 <- sample(nrow(train_nonstroke_full), 1000)
+train_nonstroke <- train_nonstroke_full[order2, ]
+test_nonstroke <- train_nonstroke_full[-order2, ]
+train <- rbind(train_nonstroke, train_stroke)
+test <- rbind(test_nonstroke, test_stroke)
+order3 <- sample(nrow(test), floor(nrow(test)/2))
+validation <- test[order3, ]
+test <- test[-order3, ]
+```
+
+Use tree model
+```{r}
+library(tree)
+library(rpart)
+
+train$stroke <- as.factor(train$stroke)
+test$stroke <- as.factor(test$stroke)
+
+#find the big.tree
+big.tree <- rpart(stroke ~., data=train, method='class',
+                  control=rpart.control(minsplit=5,cp=.0001))
+nbig = length(unique(big.tree$where))
+cat('size of big tree: ',nbig,'\n')
+#------------------------------------------------------------
+#big.tree$cptable
+cpvec = big.tree$cptable[,"CP"] #cp values to try
+ntree = length(cpvec) #number of cv values = number of trees fit.
+iltree = rep(0,ntree) #in-sample loss
+oltree = rep(0,ntree) #out-of-sample loss
+sztree = rep(0,ntree) #size of each tree
+for(i in 1:ntree) {
+  cat('tree i: ',i,'\n')
+  temptree = prune(big.tree,cp=cpvec[i])
+  sztree[i] = length(unique(temptree$where))
+  ifit = predict(temptree, train, type='class')
+  iltree[i] = (table(train$stroke, ifit)[2, 2])/nrow(train[train$stroke==1,]) #in-sample recall rate
+  il_accuracy = mean(train$stroke == ifit)
+  il_precision = (table(train$stroke, ifit)[2, 2])/sum(table(train$stroke, ifit)[, 2])
+  ofit = predict(temptree,validation,type = 'class') #use val to predict
+  oltree[i] = sum(table(ofit, validation$stroke)[2, 2])/nrow(validation[validation$stroke==1,]) #val loss
+  ol_accuracy = mean(validation$stroke == ofit)
+  ol_precision = (table(validation$stroke, ofit)[2, 2])/sum(table(validation$stroke, ofit)[, 2])
+}
+```
+
+Use tree model to test
+```{r}
+iitree = which.max(oltree)
+thetree = prune(big.tree,cp=cpvec[iitree])
+thetreepred = predict(thetree,test, type='class')
+test_table = table(test$stroke,thetreepred)
+test_table
+recall_rate = test_table[2, 2]/nrow(test[test$stroke == 1,])
+cat("racall rate:", recall_rate, '\n')
+precision_rate = test_table[2, 2]/sum(test_table[, 2])
+cat("precision rate:", precision_rate, '\n')
+accuracy_rate = mean(test$stroke == thetreepred)
+cat("accuracy rate:", accuracy_rate, '\n')
+mis_rate = mean(test$stroke != thetreepred)
+cat("mis rate:", mis_rate, '\n')
+```
+
+Variable important of tree model
+```{r}
+plot(thetree,uniform=TRUE)
+text(thetree, cex=3, digits=3)
+```
